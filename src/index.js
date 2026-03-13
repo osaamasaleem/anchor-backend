@@ -2,31 +2,101 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const User = require('./models/User');
-
-// This line allows us to use a .env file to hide our password
-require('dotenv').config(); 
+const Issuer = require('./models/Issuer'); // Import the new model
 
 const app = express();
 
-/**
- * --- DATABASE CONNECTION ---
- * We use process.env.MONGODB_URI for the Cloud (Render)
- * and fallback to the local string for development
- */
-const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/anchor_db";
 
-mongoose.connect(MONGO_URI)
-  .then(() => {
-    const connType = process.env.MONGODB_URI ? "Cloud (Atlas)" : "Local";
-    console.log(`Connected to MongoDB ${connType} ✅`);
-  })
-  .catch(err => console.error('Database Connection Error ❌:', err));
+// Database
+mongoose.connect('mongodb://localhost:27017/anchor_db')
+  .then(() => console.log('Connected to MongoDB ✅'))
+  .catch(err => console.error('MongoDB Error:', err));
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// --- ROUTES ---
+// --- ISSUER ROUTES (Phase 2B.1) ---
+
+// 1. Issuer Registration
+app.post('/api/issuer/register', async (req, res) => {
+    try {
+        const { officialEmail } = req.body;
+        const existing = await Issuer.findOne({ officialEmail });
+        if (existing) return res.status(400).json({ message: "Institution already registered." });
+
+        const newIssuer = new Issuer(req.body);
+        await newIssuer.save();
+        res.status(201).json({ message: "Success", issuer: newIssuer });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// 2. Issuer Login (With Verification Check)
+// 2. Issuer Login (Strict Validation)
+app.post('/api/issuer/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        
+        // Find the issuer by email
+        const issuer = await Issuer.findOne({ officialEmail: email });
+
+        if (!issuer || issuer.password !== password) {
+            return res.status(401).json({ message: "Invalid email or password." });
+        }
+
+        // The Gate: Block login if not verified by Admin
+        if (issuer.status !== 'verified') {
+            return res.status(403).json({ 
+                message: "Access Denied: Your institution is currently 'Pending' Admin approval.",
+                status: 'pending' 
+            });
+        }
+
+        // Only send necessary data back
+        res.json({ 
+            message: "Login Successful", 
+            user: {
+                institutionName: issuer.institutionName,
+                officialEmail: issuer.officialEmail,
+                did: issuer.did,
+                status: issuer.status
+            } 
+        });
+    } catch (err) {
+        res.status(500).json({ message: "Server error during login." });
+    }
+});
+
+
+// --- ADMIN ROUTES (The Trust Anchor Logic) Phase 2B.1 ---
+
+// 1. Get all Issuers (so the Admin can see the list)
+app.get('/api/admin/issuers', async (req, res) => {
+    try {
+        const issuers = await Issuer.find().sort({ createdAt: -1 });
+        res.json(issuers);
+    } catch (err) {
+        res.status(500).json({ message: "Failed to fetch issuers" });
+    }
+});
+
+// 2. Approve an Issuer (The "Vouching" Action)
+app.patch('/api/admin/approve/:id', async (req, res) => {
+    try {
+        const updatedIssuer = await Issuer.findByIdAndUpdate(
+            req.params.id, 
+            { status: 'verified' }, 
+            { new: true }
+        );
+        res.json({ message: "Institution Verified Successfully!", issuer: updatedIssuer });
+    } catch (err) {
+        res.status(500).json({ message: "Approval failed" });
+    }
+});
+
+// --- Holder ROUTES --- Phase 2A
 
 // 1. Registration
 app.post('/api/auth/register', async (req, res) => {
@@ -54,6 +124,7 @@ app.get('/api/users/:did', async (req, res) => {
   }
 });
 
-// Start Server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+
+// Start Server (Keep this at the bottom!)
+app.listen(5000, () => console.log('Server running on port 5000'));
