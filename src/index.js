@@ -82,17 +82,33 @@ app.get('/api/admin/issuers', async (req, res) => {
     }
 });
 
-// 2. Approve an Issuer (The "Vouching" Action)
+
+// 2. Approve an Issuer (The "Vouching" Action - Updated for Blockchain)
 app.patch('/api/admin/approve/:id', async (req, res) => {
     try {
+        // We now extract the blockchainTx hash sent from verify.html
+        const { blockchainTx } = req.body; 
+
         const updatedIssuer = await Issuer.findByIdAndUpdate(
             req.params.id, 
-            { status: 'verified' }, 
+            { 
+                status: 'verified',
+                blockchainTx: blockchainTx // Saving the on-chain proof
+            }, 
             { new: true }
         );
-        res.json({ message: "Institution Verified Successfully!", issuer: updatedIssuer });
+
+        if (!updatedIssuer) {
+            return res.status(404).json({ message: "Institution not found" });
+        }
+
+        res.json({ 
+            message: "Institution Verified & Anchored Successfully!", 
+            issuer: updatedIssuer 
+        });
     } catch (err) {
-        res.status(500).json({ message: "Approval failed" });
+        console.error("Approval Error:", err);
+        res.status(500).json({ message: "Approval failed on server" });
     }
 });
 
